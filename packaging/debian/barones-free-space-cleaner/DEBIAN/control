@@ -1,0 +1,19 @@
+Package: barones-free-space-cleaner
+Version: 1.0.0
+Section: utils
+Priority: optional
+Architecture: all
+Depends: python3, python3-gi, gir1.2-gtk-3.0
+Recommends: smartmontools
+Maintainer: Barones Project
+Description: Secure free space deletion tool for Linux
+ Barones Free Space Cleaner writes different patterns to all the free
+ space on your drives, then deletes it. This makes data recovery impossible.
+ .
+ Features:
+  - Multiple wipe patterns (zeros, ones, random data, 3487 pattern)
+  - Drive health monitoring via SMART data
+  - Progress tracking with real-time speed
+  - Simple GTK3 interface
+Homepage: https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner
+

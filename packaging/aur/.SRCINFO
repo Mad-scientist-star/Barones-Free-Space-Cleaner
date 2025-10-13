@@ -1,0 +1,26 @@
+pkgbase = barones-free-space-cleaner
+	pkgdesc = Secure free space deletion tool for Linux
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner
+	arch = any
+	license = MIT
+	depends = python
+	depends = python-gobject
+	depends = gtk3
+	optdepends = smartmontools: for drive health monitoring
+	source = https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner/archive/refs/tags/v1.0.0.tar.gz
+	source = barones-free-space-cleaner.desktop
+	source = logo_48.png
+	source = logo_64.png
+	source = logo_128.png
+	source = logo_256.png
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+	sha256sums = SKIP
+
+pkgname = barones-free-space-cleaner
+

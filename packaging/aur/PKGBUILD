@@ -1,0 +1,49 @@
+# Maintainer: Barones Project
+pkgname=barones-free-space-cleaner
+pkgver=1.0.0
+pkgrel=1
+pkgdesc="Secure free space deletion tool for Linux"
+arch=('any')
+url="https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner"
+license=('MIT')
+depends=('python' 'python-gobject' 'gtk3')
+optdepends=('smartmontools: for drive health monitoring')
+source=("https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner/archive/refs/tags/v${pkgver}.tar.gz"
+        "barones-free-space-cleaner.desktop"
+        "logo_48.png"
+        "logo_64.png"
+        "logo_128.png"
+        "logo_256.png")
+sha256sums=('SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP'
+            'SKIP')
+
+package() {
+    cd "${srcdir}/Barones-Free-Space-Cleaner-${pkgver}"
+    
+    # Install the main script
+    install -Dm755 free-space-wipe.py "${pkgdir}/usr/bin/barones-free-space-cleaner"
+    
+    # Install desktop file
+    install -Dm644 "${srcdir}/barones-free-space-cleaner.desktop" \
+        "${pkgdir}/usr/share/applications/barones-free-space-cleaner.desktop"
+    
+    # Install icons
+    install -Dm644 "${srcdir}/logo_48.png" \
+        "${pkgdir}/usr/share/icons/hicolor/48x48/apps/barones-free-space-cleaner.png"
+    install -Dm644 "${srcdir}/logo_64.png" \
+        "${pkgdir}/usr/share/icons/hicolor/64x64/apps/barones-free-space-cleaner.png"
+    install -Dm644 "${srcdir}/logo_128.png" \
+        "${pkgdir}/usr/share/icons/hicolor/128x128/apps/barones-free-space-cleaner.png"
+    install -Dm644 "${srcdir}/logo_256.png" \
+        "${pkgdir}/usr/share/icons/hicolor/256x256/apps/barones-free-space-cleaner.png"
+    install -Dm644 "${srcdir}/logo_48.png" \
+        "${pkgdir}/usr/share/pixmaps/barones-free-space-cleaner.png"
+    
+    # Install README
+    install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
+
