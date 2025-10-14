@@ -54,11 +54,22 @@ Supported distributions: Fedora 35+, RHEL 8+, CentOS Stream 8+, Rocky Linux 8+, 
 
 ### Arch Linux (and derivatives)
 
-Clone the repository and use the AUR package:
+The package is available on the AUR. Install using your preferred AUR helper:
 
+**Using yay:**
 ```bash
-git clone https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner.git
-cd Barones-Free-Space-Cleaner/packaging/aur
+yay -S barones-free-space-cleaner
+```
+
+**Using paru:**
+```bash
+paru -S barones-free-space-cleaner
+```
+
+**Manual installation:**
+```bash
+git clone https://aur.archlinux.org/barones-free-space-cleaner.git
+cd barones-free-space-cleaner
 makepkg -si
 ```
 
@@ -137,7 +148,7 @@ This tool overwrites free space only. It does not touch your existing files. How
 
 ## License
 
-This project is open source. See LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
