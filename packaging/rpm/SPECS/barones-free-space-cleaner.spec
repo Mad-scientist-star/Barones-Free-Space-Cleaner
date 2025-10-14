@@ -1,5 +1,5 @@
 Name:           barones-free-space-cleaner
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Secure free space deletion tool for Linux
 
