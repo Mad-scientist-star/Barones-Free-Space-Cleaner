@@ -25,37 +25,59 @@ The philosophy behind this program is **simplicity**. No complicated settings, n
 
 ## Installation
 
+Barones Free Space Cleaner is available as professional distribution packages for all major Linux distributions.
+
+### Debian/Ubuntu (and derivatives)
+
+Download the `.deb` package from the [releases page](https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner/releases) and install:
+
+```bash
+sudo dpkg -i barones-free-space-cleaner_1.0.0_all.deb
+```
+
+Supported distributions: Debian 10+, Ubuntu 20.04+, Linux Mint 20+, Pop!_OS 20.04+, Elementary OS 6+
+
+### Fedora/RHEL (and derivatives)
+
+Download the `.rpm` package from the [releases page](https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner/releases) and install:
+
+```bash
+sudo rpm -i barones-free-space-cleaner-1.0.0-1.noarch.rpm
+```
+
+Or with dnf:
+```bash
+sudo dnf install barones-free-space-cleaner-1.0.0-1.noarch.rpm
+```
+
+Supported distributions: Fedora 35+, RHEL 8+, CentOS Stream 8+, Rocky Linux 8+, AlmaLinux 8+
+
+### Arch Linux (and derivatives)
+
+Clone the repository and use the AUR package:
+
+```bash
+git clone https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner.git
+cd Barones-Free-Space-Cleaner/packaging/aur
+makepkg -si
+```
+
+Supported distributions: Arch Linux, Manjaro, EndeavourOS, Garuda Linux
+
+### After Installation
+
+The application will appear in your Applications menu under System/Utilities as **"Barones Free Space Cleaner"** with a custom icon.
+
+You can also launch it from the terminal:
+```bash
+barones-free-space-cleaner
+```
+
 ### Requirements
 
-- Linux operating system
+All packages automatically install dependencies:
 - Python 3 with GTK 3.0 (PyGObject)
-- `smartctl` for drive health monitoring (optional)
-
-### Quick Install
-
-```bash
-# Clone the repository
-git clone https://github.com/Mad-scientist-star/Barones-Free-Space-Cleaner.git
-
-# Navigate to the directory
-cd Barones-Free-Space-Cleaner
-
-# Run the installer
-./installer-script.sh
-```
-
-The installer will:
-- Copy the program to `~/.local/bin/`
-- Create a desktop entry
-- Place a launcher icon on your desktop
-
-### Manual Installation
-
-If you prefer to run it manually:
-
-```bash
-python3 free-space-wipe.py
-```
+- Optional: `smartctl` for drive health monitoring
 
 ## Usage
 
@@ -127,5 +149,5 @@ Inspired by similar Windows utilities, built for Linux with simplicity in mind.
 
 ---
 
-**For more information, visit the [project website](#)** *(coming soon)*
+**For more information and downloads, visit the [project website](https://barones-free-space-cleaner.manus.app)**
 
