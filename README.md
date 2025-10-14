@@ -149,5 +149,5 @@ Inspired by similar Windows utilities, built for Linux with simplicity in mind.
 
 ---
 
-**For more information and downloads, visit the [project website](https://barones-free-space-cleaner.manus.app)**
+**For more information and downloads, visit the [project website](https://barones-nrc69p.manus.space)**
 

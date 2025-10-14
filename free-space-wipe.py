@@ -313,56 +313,36 @@ class HealthPanelWindow(Gtk.Window):
         self.show_all()
     
     def calculate_ssd_assessment(self, health_data):
-        """Calculate overall SSD health assessment"""
+        """Calculate overall SSD health assessment with 5-level system"""
         drive_type = self.drive_info.get('type', 'Unknown')
         
         if 'SSD' not in drive_type:
             self.assessment_label.set_markup("<b>Drive Type:</b> <span foreground='blue'>Non-SSD</span>")
             return
         
-        # Look for key SSD health indicators
-        warning_signs = []
-        good_signs = []
+        # Initialize scoring factors
+        life_remaining = None
+        temperature = None
+        error_count = 0
+        reserved_space = None
         
-        # Check wear indicators
-        if 'Media Wearout Indicator' in health_data:
+        # Extract life remaining (most important factor)
+        if 'Media Wearout Indicator' in health_data or 'SSD Life Left' in health_data:
             try:
-                wear_value = int(health_data['Media Wearout Indicator'].replace('%', ''))
-                if wear_value < 50:
-                    warning_signs.append(f"High wear: {wear_value}%")
-                else:
-                    good_signs.append(f"Good wear level: {wear_value}%")
+                key = 'Media Wearout Indicator' if 'Media Wearout Indicator' in health_data else 'SSD Life Left'
+                life_remaining = int(health_data[key].replace('%', ''))
             except:
                 pass
         
-        # Check available reserved space
-        if 'Available Reserved Space' in health_data:
-            try:
-                reserved = health_data['Available Reserved Space']
-                if '%' in reserved:
-                    reserved_value = int(reserved.replace('%', ''))
-                    if reserved_value < 10:
-                        warning_signs.append("Low reserved space")
-                    else:
-                        good_signs.append("Good reserved space")
-            except:
-                pass
-        
-        # Check temperature
+        # Extract temperature
         if 'Temperature' in health_data:
             try:
-                temp_str = health_data['Temperature'].replace('°C', '')
-                temp = int(temp_str)
-                if temp > 70:
-                    warning_signs.append(f"High temp: {temp}°C")
-                elif temp > 60:
-                    good_signs.append(f"Warm: {temp}°C")
-                else:
-                    good_signs.append(f"Good temp: {temp}°C")
+                temp_str = health_data['Temperature'].replace('°C', '').strip()
+                temperature = int(temp_str)
             except:
                 pass
         
-        # Check for errors
+        # Count errors
         error_indicators = ['Reallocated Sector Count', 'Current Pending Sector Count',
                            'Reported Uncorrectable Errors', 'Command Timeout']
         for indicator in error_indicators:
@@ -370,27 +350,85 @@ class HealthPanelWindow(Gtk.Window):
                 try:
                     value = int(health_data[indicator])
                     if value > 0:
-                        warning_signs.append(f"{indicator}: {value}")
-                    else:
-                        good_signs.append(f"No {indicator.lower()}")
+                        error_count += value
                 except:
                     pass
         
-        # Determine overall status
-        if warning_signs:
-            status_text = "⚠️ SSD needs attention"
-            color = "red"
-            details = f" ({len(warning_signs)} warnings)"
-        elif good_signs:
-            status_text = "✅ SSD good shape"
-            color = "green"
-            details = ""
-        else:
-            status_text = "❓ SSD status unknown"
-            color = "orange"
-            details = ""
+        # Check reserved space
+        if 'Available Reserved Space' in health_data:
+            try:
+                reserved = health_data['Available Reserved Space']
+                if '%' in reserved:
+                    reserved_space = int(reserved.replace('%', ''))
+            except:
+                pass
         
-        self.assessment_label.set_markup(f"<b>SSD Status:</b> <span foreground='{color}'>{status_text}{details}</span>")
+        # Determine health level based on factors (prioritize life remaining)
+        if life_remaining is None:
+            # No life data available
+            status_text = "❓ Unknown"
+            color = "gray"
+            message = "Unable to determine SSD health"
+        elif life_remaining >= 80:
+            # Excellent: Brand new or lightly used
+            if temperature and temperature > 60:
+                status_text = "🟢 Excellent (but warm)"
+                color = "green"
+                message = f"Drive is in excellent condition. Temp: {temperature}°C"
+            else:
+                status_text = "🟢 Excellent"
+                color = "green"
+                message = "Drive is in excellent condition. Safe for wiping."
+        elif life_remaining >= 50:
+            # Good: Healthy drive
+            if temperature and temperature > 70:
+                status_text = "🟢 Good (hot)"
+                color = "green"
+                message = f"Drive is healthy but hot ({temperature}°C). Monitor temperature."
+            elif error_count > 5:
+                status_text = "🟢 Good (some errors)"
+                color = "green"
+                message = f"Drive is healthy but has {error_count} errors. Safe for wiping."
+            else:
+                status_text = "🟢 Good"
+                color = "green"
+                message = "Drive is healthy. Safe for wiping."
+        elif life_remaining >= 30:
+            # Fair: Aging but usable
+            if temperature and temperature > 70:
+                status_text = "🟡 Fair (hot)"
+                color = "orange"
+                message = f"Drive is aging and hot ({temperature}°C). Wiping will add wear."
+            elif error_count > 10:
+                status_text = "🟡 Fair (errors)"
+                color = "orange"
+                message = f"Drive is aging with {error_count} errors. Wiping will add wear."
+            else:
+                status_text = "🟡 Fair"
+                color = "orange"
+                message = f"Drive is aging ({life_remaining}% life left). Wiping will add wear."
+        elif life_remaining >= 15:
+            # Warning: Worn drive, not recommended
+            status_text = "🟠 Warning"
+            color = "#ff6600"  # Dark orange
+            message = f"⚠️ Drive is worn ({life_remaining}% life left). Wiping NOT recommended."
+        else:
+            # Critical: Very worn, DO NOT WIPE
+            status_text = "🔴 Critical"
+            color = "red"
+            message = f"🛑 Critical: Don't wipe this drive! Only {life_remaining}% life left. Risk of failure."
+        
+        # Add temperature warning for critical temps regardless of life
+        if temperature and temperature > 80:
+            status_text = "🔴 Critical"
+            color = "red"
+            message = f"🛑 Critical temperature: {temperature}°C! Don't wipe this drive."
+        
+        # Display the assessment
+        self.assessment_label.set_markup(
+            f"<b>SSD Status:</b> <span foreground='{color}'>{status_text}</span>\n"
+            f"<span foreground='{color}'><small>{message}</small></span>"
+        )
     
     def show_error(self, error_msg):
         """Show error message in health panel"""
