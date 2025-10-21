@@ -536,7 +536,13 @@ class FreeSpaceWipeWindow(Gtk.Window):
         self.mft_scan_progress_dialog = None
         self.mft_scan_cache = {}  # Cache MFT scan results by device path
         self.mft_scan_cancel_button = None
-        
+
+        # exFAT scanning
+        self.exfat_scan_cancel = False
+        self.exfat_scan_progress_dialog = None
+        self.exfat_scan_cache = {}  # Cache exFAT scan results by device path
+        self.exfat_scan_thread = None
+
         # Main vertical box
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.add(vbox)
@@ -1075,7 +1081,12 @@ class FreeSpaceWipeWindow(Gtk.Window):
                         # Start background scan with progress dialog
                         self._start_background_mft_scan(drive_info)
                 elif 'EXFAT' in fstype:
-                    self.mft_status_label.set_markup("<span foreground='blue'>exFAT directory cleaning</span>")
+                    # Check cache first
+                    if mount_point in self.exfat_scan_cache:
+                        self._update_tooltip_with_exfat_info(self.exfat_scan_cache[mount_point])
+                    else:
+                        # Start background scan with progress dialog
+                        self._start_background_exfat_scan(drive_info)
                 else:
                     self.mft_status_label.set_markup("<span foreground='gray'>Metadata cleaning not supported</span>")
             else:
@@ -1221,7 +1232,124 @@ class FreeSpaceWipeWindow(Gtk.Window):
         """Hide tooltip when mouse leaves MFT button"""
         if self.mft_tooltip_window:
             self.mft_tooltip_window.hide()
-    
+
+    def _start_background_exfat_scan(self, drive_info):
+        """Start exFAT scanning in background thread with progress dialog"""
+        # Show warning popup
+        dialog = Gtk.MessageDialog(
+            parent=self,
+            flags=Gtk.DialogFlags.MODAL,
+            type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="Scanning exFAT Directory"
+        )
+        dialog.format_secondary_text(
+            "Analyzing exFAT directory entries. This may take several minutes on external or large drives.\n\n"
+            "Please wait..."
+        )
+        dialog.run()
+        dialog.destroy()
+
+        # Show initial scanning message
+        if hasattr(self, 'mft_status_label') and self.mft_status_label:
+            self.mft_status_label.set_markup("<span foreground='blue'><i>Scanning exFAT...</i></span>")
+        print(f"🔍 Starting exFAT background scan for: {drive_info['mount_point']}")
+
+        # Create and show progress dialog
+        self.exfat_scan_progress_dialog = MFTScanProgressDialog(self, drive_info['mount_point'])
+
+        # Start background thread
+        self.exfat_scan_cancel = False
+        self.exfat_scan_thread = threading.Thread(
+            target=self._exfat_scan_thread_worker,
+            args=(drive_info,)
+        )
+        self.exfat_scan_thread.daemon = True
+        self.exfat_scan_thread.start()
+
+    def _exfat_scan_thread_worker(self, drive_info):
+        """Worker thread for exFAT scanning"""
+        try:
+            mount_point = drive_info['mount_point']
+
+            # Update progress dialog
+            if self.exfat_scan_progress_dialog:
+                self.exfat_scan_progress_dialog.update_progress("<b>Scanning exFAT directory entries...</b>")
+
+            # Perform the actual exFAT scan
+            enhanced_exfat_info = self._get_enhanced_exfat_info(mount_point)
+
+            # Cache the result
+            self.exfat_scan_cache[mount_point] = enhanced_exfat_info
+
+            # Update UI in main thread
+            GLib.idle_add(self._finish_exfat_scan, enhanced_exfat_info)
+
+        except Exception as e:
+            print(f"exFAT scan error: {e}")
+            GLib.idle_add(self._finish_exfat_scan_error)
+
+    def _finish_exfat_scan(self, enhanced_exfat_info):
+        """Called when exFAT scan completes - update UI in main thread"""
+        print(f"✅ exFAT scan completed, received info: {enhanced_exfat_info}")
+
+        # Close progress dialog if still open
+        if self.exfat_scan_progress_dialog:
+            try:
+                self.exfat_scan_progress_dialog.destroy()
+            except:
+                pass
+            self.exfat_scan_progress_dialog = None
+
+        # Update tooltip with results
+        if enhanced_exfat_info and hasattr(self, 'mft_status_label') and self.mft_status_label:
+            self._update_tooltip_with_exfat_info(enhanced_exfat_info)
+            print(f"✅ Updated tooltip with exFAT info")
+        else:
+            if hasattr(self, 'mft_status_label') and self.mft_status_label:
+                self.mft_status_label.set_markup("<span foreground='gray'>exFAT info unavailable</span>")
+                print(f"⚠️ No exFAT info available")
+        return False  # Don't repeat this callback
+
+    def _finish_exfat_scan_error(self):
+        """Called when exFAT scan errors - update UI"""
+        if self.exfat_scan_progress_dialog:
+            try:
+                self.exfat_scan_progress_dialog.destroy()
+            except:
+                pass
+            self.exfat_scan_progress_dialog = None
+
+        if hasattr(self, 'mft_status_label') and self.mft_status_label:
+            self.mft_status_label.set_markup("<span foreground='red'>Scan failed</span>")
+            print(f"❌ exFAT scan failed")
+        return False
+
+    def _update_tooltip_with_exfat_info(self, exfat_info):
+        """Update tooltip label with exFAT directory information"""
+        if not hasattr(self, 'mft_status_label') or not self.mft_status_label:
+            print("⚠️ mft_status_label not found")
+            return False
+
+        if not exfat_info or exfat_info['deleted_entries'] == 0:
+            markup = "<span foreground='gray'>exFAT info unavailable</span>"
+            self.mft_status_label.set_markup(markup)
+            print(f"📝 Set label: exFAT info unavailable")
+            return False
+
+        # Get counts
+        deleted_entries = exfat_info.get('deleted_entries', 0)
+        method = exfat_info.get('method', 'unknown')
+
+        status_text = f"<b>exFAT Deleted Entries: {deleted_entries:,}</b>\n"
+        status_text += f"Method: {method.replace('_', ' ').title()}"
+
+        self.mft_status_label.set_markup(status_text)
+        print(f"📝 exFAT Status")
+        print(f"   Deleted entries found: {deleted_entries:,}")
+        print(f"   Method: {method.replace('_', ' ').title()}")
+        return False
+
     def _start_mft_clean_only(self, drive_info):
         """Start MFT cleaning only (called from Start button when MFT option selected)"""
         # Start MFT cleaning in a thread (no free space wipe)
@@ -1545,13 +1673,13 @@ class FreeSpaceWipeWindow(Gtk.Window):
                 free_percentage = (free_entries / total_entries * 100) if total_entries > 0 else 0
                 drive_type = drive_info.get('type', 'Unknown')
 
-                # Simple: wipe 80% of free MFT entries, no safety factors
-                target_percentage = 0.80
+                # Simple: wipe 95% of free MFT entries, no safety factors
+                target_percentage = 0.95
                 target_files = int(free_entries * target_percentage)
 
-                print(f"🎯 MFT Cleaning Target: 80% of free entries")
+                print(f"🎯 MFT Cleaning Target: 95% of free entries")
                 print(f"   Free MFT entries found: {free_entries:,} ({free_percentage:.2f}% of total)")
-                print(f"   Target to clean: {target_files:,} files (80% × {free_entries:,})")
+                print(f"   Target to clean: {target_files:,} files (95% × {free_entries:,})")
                 print(f"   Drive type: {drive_type}")
 
             # FALLBACK: Use basic MFT info if enhanced detection fails
@@ -1746,6 +1874,26 @@ class FreeSpaceWipeWindow(Gtk.Window):
         dialog.set_default_size(400, 200)
         dialog.run()
         dialog.destroy()
+
+    def _show_exfat_failure_popup(self, mount_point):
+        """Show popup dialog when exFAT cleaning fails"""
+        dialog = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            text="exFAT Metadata Cleaning Unavailable"
+        )
+        dialog.format_secondary_text(
+            f"Could not create exFAT cleaning folder on {mount_point} after 5 attempts.\n\n"
+            "This is normal for read-only or failing external drives.\n\n"
+            "The tool will now proceed with regular free space wiping only.\n"
+            "exFAT metadata cleaning will be skipped for this drive."
+        )
+        
+        dialog.set_default_size(400, 200)
+        dialog.run()
+        dialog.destroy()
     
     def _create_mft_file_with_usb_limiting(self, i, filepath, mft_entry_size, drive_info):
         """Create individual MFT file with rate limiting for external drives"""
@@ -1886,50 +2034,261 @@ class FreeSpaceWipeWindow(Gtk.Window):
             print(f"⚠️ Error during exFAT cleanup: {e}")
         
         print(f"✅ exFAT cleanup completed - total files removed: {files_removed:,}")
-    
-    def _clean_exfat_metadata(self, mount_point):
+
+    def _get_enhanced_exfat_info(self, device_path):
+        """Get comprehensive exFAT directory information including deleted entries"""
+        exfat_info = {
+            'total_entries': 0,
+            'deleted_entries': 0,  # Free directory entries (IN_USE flag cleared)
+            'entry_size': 32,  # exFAT directory entries are 32 bytes
+            'deleted_percentage': 0,
+            'method': 'unknown'
+        }
+
+        # Get device path from mount point
+        try:
+            result = subprocess.run(['df', device_path], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    device_line = lines[1].split()
+                    if len(device_line) >= 1:
+                        raw_device = device_line[0]
+
+                        # Use fls to count deleted exFAT directory entries
+                        try:
+                            print(f"📊 Scanning FREE exFAT directory entries on {raw_device}...")
+                            print(f"   Using: fls -f exfat -d -r (finds unallocated/free directory entries only)")
+
+                            # Use -d flag to find ONLY deleted/free directory entries
+                            # No timeout - let it run until complete (can take time on large drives)
+                            fls_result = subprocess.run(
+                                ['fls', '-f', 'exfat', '-d', '-r', raw_device],
+                                capture_output=True, text=True, timeout=None
+                            )
+                            if fls_result.returncode == 0:
+                                # Count free directory entries
+                                deleted_entries = 0
+                                for line in fls_result.stdout.split('\n'):
+                                    if line.strip():
+                                        deleted_entries += 1
+
+                                exfat_info['deleted_entries'] = deleted_entries
+                                exfat_info['method'] = 'fls_analysis'
+
+                                print(f"✅ Free exFAT Directory Entries Found (IN_USE flag cleared):")
+                                print(f"   Free/reusable entries: {deleted_entries:,}")
+                                print(f"   These entries still contain deleted file metadata that should be wiped")
+                            else:
+                                print(f"⚠️ fls failed: {fls_result.stderr}")
+                        except Exception as e:
+                            print(f"⚠️ fls error: {e}")
+        except Exception as e:
+            print(f"⚠️ Enhanced exFAT detection error: {e}")
+
+        # FALLBACK: Use drive-size based estimation if fls analysis unavailable
+        if exfat_info['deleted_entries'] == 0:
+            try:
+                usage = shutil.disk_usage(device_path)
+                drive_size_gb = usage.total / (1024**3)
+
+                # Conservative scaling based on drive size (similar to MFT fallback)
+                if drive_size_gb < 100:  # Small drives (< 100GB)
+                    deleted_entries = 5000
+                elif drive_size_gb < 500:  # Medium drives (100-500GB)
+                    deleted_entries = 10000
+                elif drive_size_gb < 2000:  # Large drives (500GB-2TB)
+                    deleted_entries = 20000
+                else:  # Huge drives (2TB+)
+                    deleted_entries = 50000
+
+                exfat_info['deleted_entries'] = deleted_entries
+                exfat_info['method'] = 'drive_size_fallback'
+
+                print(f"📏 Drive-size fallback: {drive_size_gb:.0f}GB → {deleted_entries:,} estimated deleted entries")
+
+            except Exception as e:
+                print(f"⚠️ Drive size calculation failed: {e}")
+                exfat_info['deleted_entries'] = 10000  # Absolute fallback
+                exfat_info['method'] = 'absolute_fallback'
+                print(f"⚠️ Using absolute fallback: 10,000 estimated entries")
+
+        # Calculate percentages if we have data
+        if exfat_info['deleted_entries'] > 0:
+            exfat_info['deleted_percentage'] = exfat_info['deleted_entries']
+
+        # Log analysis summary
+        print(f"📋 exFAT Directory Analysis Summary:")
+        print(f"   Method used: {exfat_info['method'].replace('_', ' ').title()}")
+        print(f"   Estimated deleted entries: {exfat_info['deleted_entries']:,}")
+        print(f"   └─ These entries may contain deleted file metadata that should be wiped")
+
+        return exfat_info
+
+    def _clean_exfat_metadata(self, mount_point, drive_info):
         """Clean exFAT directory metadata by creating/deleting files with specific patterns"""
         import time
         start_time = time.time()
         print(f"Starting exFAT metadata cleaning at {time.strftime('%H:%M:%S')}...")
-        
-        temp_dir = os.path.join(mount_point, "EXFAT_Clean_Temp")
-        os.makedirs(temp_dir, exist_ok=True)
-        
+
+        # LIMITED RETRY: 5 attempts with random folder names, then popup (similar to MFT)
+        temp_dir = None
+        max_attempts = 5
+        attempt = 0
+
+        while attempt < max_attempts and not self.cancelled:
+            # Generate random folder name
+            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+            temp_dir = os.path.join(mount_point, f"EXFAT_{random_suffix}")
+            
+            try:
+                os.makedirs(temp_dir, exist_ok=True)
+                
+                # CRITICAL: Verify the folder actually exists and is writable
+                if os.path.exists(temp_dir) and os.path.isdir(temp_dir):
+                    # Test write access by creating a small test file
+                    test_file = os.path.join(temp_dir, "test_write.tmp")
+                    try:
+                        with open(test_file, 'wb') as f:
+                            f.write(b"test")
+                        os.remove(test_file)  # Clean up
+                        print(f"✅ SUCCESS: Created exFAT cleaning folder on target drive: {temp_dir}")
+                        print(f"✅ VERIFIED: Write access confirmed - folder is real and writable")
+                        break  # Real success! Exit retry loop
+                    except OSError as write_error:
+                        print(f"❌ WRITE ACCESS FAILED: Cannot write to {temp_dir} - {write_error}")
+                        print(f"❌ This means the folder exists but is not writable")
+                        # Continue to next attempt
+                        continue
+                else:
+                    print(f"❌ PHANTOM FOLDER BUG: {temp_dir} reported as created but doesn't exist!")
+                    print(f"❌ This is a serious issue - the folder creation succeeded but folder is not real")
+                    # Continue to next attempt
+                    continue
+                
+            except OSError as e:
+                attempt += 1
+                print(f"⚠️ Attempt {attempt}/{max_attempts}: Cannot create {temp_dir} - {e}")
+                
+                # Brief pause between attempts
+                time.sleep(0.2)
+                
+                if self.cancelled:
+                    print("🛑 User cancelled - stopping exFAT cleaning attempts")
+                    return False
+
+        # Check if we succeeded or need to show popup
+        if temp_dir is None or not os.path.exists(temp_dir):
+            print("❌ FAILED: Could not create exFAT cleaning folder on target drive after 5 attempts")
+            print("📋 This is expected for read-only or failing external drives")
+            
+            # Show popup dialog to user
+            self._show_exfat_failure_popup(mount_point)
+            
+            # Return False to skip exFAT cleaning but continue with free space wipe
+            return False
+
         try:
-            # exFAT uses different directory structure than NTFS
-            # We'll create fewer files but with patterns that stress the directory entries
-            
+            # Get enhanced exFAT directory analysis from cache (user should have already scanned)
+            enhanced_exfat_info = self.exfat_scan_cache.get(mount_point)
+            target_files_phase1 = None
+            target_files_phase3 = None
+
+            # FIRST CHOICE: Use cached exFAT analysis with deleted entry detection
+            if enhanced_exfat_info and enhanced_exfat_info['deleted_entries'] > 0:
+                deleted_entries = enhanced_exfat_info['deleted_entries']
+
+                # Target: wipe 95% of deleted directory entries, similar to MFT approach
+                target_percentage = 0.95
+                target_files_phase1 = int(deleted_entries * target_percentage)
+                target_files_phase3 = int(deleted_entries * 0.5)  # Half for final overwrite
+
+                print(f"🎯 exFAT Cleaning Target: 95% of deleted entries")
+                print(f"   Deleted exFAT entries found: {deleted_entries:,}")
+                print(f"   Phase 1 target: {target_files_phase1:,} files (95% × {deleted_entries:,})")
+                print(f"   Phase 3 target: {target_files_phase3:,} files (50% × {deleted_entries:,})")
+
+            # FALLBACK: Use conservative defaults if no cached scan available
+            if target_files_phase1 is None:
+                target_files_phase1 = 10000
+                target_files_phase3 = 5000
+                print(f"⚠️ No cached exFAT scan - using default fallback: {target_files_phase1:,} and {target_files_phase3:,} files")
+
             print("exFAT Phase 1: Creating directory entry pressure...")
-            GLib.idle_add(self._update_info_label, "exFAT Cleaning: Creating directory entries...")
-            
+            GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Creating {target_files_phase1:,} metadata files...")
+
             files_created = []
             phase1_start = time.time()
-            
-            # exFAT directory entries are more limited, so we use fewer files
-            # but with longer names and different patterns to maximize directory space usage
-            for i in range(10000):  # Fewer than NTFS but still effective
+
+            # Rate limiter: 100 files/sec (10ms per file)
+            target_rate = 100  # files per second
+            min_time_per_file = 1.0 / target_rate  # 0.01 seconds
+
+            for i in range(target_files_phase1):
                 # Check for cancellation
                 if self.cancelled:
                     print("🛑 exFAT cleaning cancelled by user - cleaning up files...")
                     break
-                
+
+                file_start_time = time.time()
+
                 # Use longer names to consume more directory entry space
                 filename = f"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ_EXFAT_DIR_{i:06d}_LONGNAME.ZZZ"
                 filepath = os.path.join(temp_dir, filename)
-                
+
                 try:
-                    # Create with some content to allocate clusters
-                    with open(filepath, 'w') as f:
-                        f.write("EXFAT" * 100)  # 500 bytes - enough to allocate a cluster
+                    # Create with random content to allocate clusters (binary mode for urandom)
+                    with open(filepath, 'wb') as f:
+                        f.write(os.urandom(500))  # 500 random bytes - enough to allocate a cluster
                     files_created.append(filepath)
+
+                    # CCLEANER-STYLE RATE LIMITING: Slower for external drives (similar to MFT)
+                    device_name = drive_info.get('name', 'unknown')
+                    drive_type = self._get_drive_type(device_name)
+                    is_external = 'USB' in drive_type.upper() or 'HDD' in drive_type.upper()
                     
-                    if i % 2000 == 0 and i > 0:
+                    if is_external:
+                        # Target: 100 files/sec on USB drives
+                        if i % 50 == 0:  # Every 50 files
+                            time.sleep(0.5)  # ~100 files/sec
+
+                    # Rate limiting: ensure we don't exceed target rate (100 files/sec)
+                    # Use interruptible sleep to allow cancellation
+                    elapsed_file = time.time() - file_start_time
+                    if elapsed_file < min_time_per_file:
+                        sleep_time = min_time_per_file - elapsed_file
+                        sleep_start = time.time()
+                        while time.time() - sleep_start < sleep_time:
+                            if self.cancelled:
+                                break
+                            time.sleep(0.001)  # Check every 1ms for cancellation
+
+                    # Update progress with percentage and time estimate (every 500 files)
+                    if i % 500 == 0:
+                        progress = i / target_files_phase1 if target_files_phase1 > 0 else 0
                         elapsed = time.time() - phase1_start
                         rate = i / elapsed if elapsed > 0 else 0
-                        GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Created {i} entries... ({rate:.0f} entries/sec)")
-                        print(f"exFAT entries {i}... ({rate:.0f} entries/sec)")
-                        
+
+                        # Calculate estimated time remaining
+                        remaining_files = target_files_phase1 - i
+                        time_remaining = remaining_files / rate if rate > 0 else 0
+
+                        # Format time remaining
+                        hours = int(time_remaining / 3600)
+                        mins = int((time_remaining % 3600) / 60)
+                        secs = int(time_remaining % 60)
+
+                        if hours > 0:
+                            time_str = f"{hours}h {mins}m {secs}s"
+                        elif mins > 0:
+                            time_str = f"{mins}m {secs}s"
+                        else:
+                            time_str = f"{secs}s"
+
+                        GLib.idle_add(self.progress_bar.set_fraction, progress)
+                        GLib.idle_add(self._update_info_label, f"exFAT Phase 1: {i:,}/{target_files_phase1:,} at {rate:.0f} entries/sec  Est: {time_str}")
+                        print(f"exFAT Phase 1: {i:,} entries at {rate:.0f} entries/sec")
+
                 except OSError as e:
                     if e.errno == 28:  # Disk full
                         print(f"exFAT directory pressure achieved after {i} entries")
@@ -1939,51 +2298,85 @@ class FreeSpaceWipeWindow(Gtk.Window):
             
             phase1_time = time.time() - phase1_start
             print(f"exFAT Phase 1 completed: {len(files_created)} entries in {phase1_time:.1f} seconds")
-            
-            # Phase 2: Delete to free directory entries
-            phase2_start = time.time()
-            GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Deleting {len(files_created)} entries...")
-            print(f"exFAT Phase 2: Deleting {len(files_created)} entries...")
-            
-            for i, filepath in enumerate(files_created):
-                try:
-                    os.remove(filepath)
-                    if i % 2000 == 0 and i > 0:
-                        elapsed = time.time() - phase2_start
-                        rate = i / elapsed if elapsed > 0 else 0
-                        GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Deleted {i} entries... ({rate:.0f} entries/sec)")
-                        print(f"exFAT deleted {i}... ({rate:.0f} entries/sec)")
-                except OSError:
-                    pass
-            
-            phase2_time = time.time() - phase2_start
-            print(f"exFAT Phase 2 completed: {len(files_created)} entries deleted in {phase2_time:.1f} seconds")
-            
-            # Phase 3: Create final entries to overwrite freed directory space
-            phase3_start = time.time()
-            GLib.idle_add(self._update_info_label, "exFAT Cleaning: Final directory overwrite...")
-            print("exFAT Phase 3: Creating final directory entries...")
-            
-            final_files = []
-            for i in range(5000):  # Fewer final files for exFAT
-                filename = f"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ_EXFAT_FINAL_{i:05d}.ZZZ"
-                filepath = os.path.join(temp_dir, filename)
-                
-                try:
-                    with open(filepath, 'w') as f:
-                        f.write("EXFAT_CLEAN" * 50)  # Different pattern
-                    final_files.append(filepath)
-                    
-                    if i % 1000 == 0 and i > 0:
-                        elapsed = time.time() - phase3_start
-                        rate = i / elapsed if elapsed > 0 else 0
-                        GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Final entries {i}... ({rate:.0f} entries/sec)")
-                        print(f"exFAT final {i}... ({rate:.0f} entries/sec)")
-                except OSError:
-                    break
-            
-            phase3_time = time.time() - phase3_start
-            print(f"exFAT Phase 3 completed: {len(final_files)} entries in {phase3_time:.1f} seconds")
+
+            # Check if user cancelled - skip to cleanup if so
+            if self.cancelled:
+                print("🛑 User cancelled during Phase 1 - skipping to cleanup")
+                phase2_time = 0
+                phase3_time = 0
+            else:
+                # Phase 2: Delete to free directory entries
+                phase2_start = time.time()
+                GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Deleting {len(files_created)} entries...")
+                print(f"exFAT Phase 2: Deleting {len(files_created)} entries...")
+
+                for i, filepath in enumerate(files_created):
+                    try:
+                        os.remove(filepath)
+                        if i % 2000 == 0 and i > 0:
+                            elapsed = time.time() - phase2_start
+                            rate = i / elapsed if elapsed > 0 else 0
+                            GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Deleted {i} entries... ({rate:.0f} entries/sec)")
+                            print(f"exFAT deleted {i}... ({rate:.0f} entries/sec)")
+                    except OSError:
+                        pass
+
+                phase2_time = time.time() - phase2_start
+                print(f"exFAT Phase 2 completed: {len(files_created)} entries deleted in {phase2_time:.1f} seconds")
+
+                # Phase 3: Create final entries to overwrite freed directory space
+                if not self.cancelled:
+                    phase3_start = time.time()
+                    GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Final directory overwrite ({target_files_phase3:,} entries)...")
+                    print(f"exFAT Phase 3: Creating {target_files_phase3:,} final directory entries...")
+
+                    final_files = []
+                    for i in range(target_files_phase3):
+                        # Check for cancellation
+                        if self.cancelled:
+                            print("🛑 exFAT cleaning cancelled by user - cleaning up files...")
+                            break
+
+                        file_start_time = time.time()
+
+                        filename = f"ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ_EXFAT_FINAL_{i:05d}.ZZZ"
+                        filepath = os.path.join(temp_dir, filename)
+
+                        try:
+                            # Create with random content for final overwrite (binary mode)
+                            with open(filepath, 'wb') as f:
+                                f.write(os.urandom(250))  # 250 random bytes for final overwrite
+                            final_files.append(filepath)
+
+                            # CCLEANER-STYLE RATE LIMITING: Slower for external drives
+                            if is_external:
+                                if i % 50 == 0:
+                                    time.sleep(0.5)  # ~100 files/sec
+
+                            # Rate limiting: ensure we don't exceed target rate (100 files/sec)
+                            elapsed_file = time.time() - file_start_time
+                            if elapsed_file < min_time_per_file:
+                                sleep_time = min_time_per_file - elapsed_file
+                                sleep_start = time.time()
+                                while time.time() - sleep_start < sleep_time:
+                                    if self.cancelled:
+                                        break
+                                    time.sleep(0.001)
+
+                            if i % 1000 == 0 and i > 0:
+                                elapsed = time.time() - phase3_start
+                                rate = i / elapsed if elapsed > 0 else 0
+                                GLib.idle_add(self._update_info_label, f"exFAT Cleaning: Final entries {i}... ({rate:.0f} entries/sec)")
+                                print(f"exFAT final {i}... ({rate:.0f} entries/sec)")
+                        except OSError:
+                            break
+
+                    phase3_time = time.time() - phase3_start
+                    print(f"exFAT Phase 3 completed: {len(final_files)} entries in {phase3_time:.1f} seconds")
+                else:
+                    print("🛑 User cancelled during Phase 2 - skipping to cleanup")
+                    phase3_time = 0
+                    final_files = []
             
             # Phase 4: Clean up
             cleanup_start = time.time()
@@ -2040,7 +2433,7 @@ class FreeSpaceWipeWindow(Gtk.Window):
         elif 'EXFAT' in fstype:
             print("exFAT drive detected - cleaning directory metadata only...")
             GLib.idle_add(self._update_info_label, "Cleaning exFAT metadata only...")
-            success = self._clean_exfat_metadata(mount_point)
+            success = self._clean_exfat_metadata(mount_point, drive_info)
             if success:
                 GLib.idle_add(self._update_info_label, "exFAT metadata cleaning completed!")
             else:
@@ -2081,7 +2474,7 @@ class FreeSpaceWipeWindow(Gtk.Window):
         elif 'EXFAT' in fstype:
             print("exFAT drive detected - cleaning directory metadata first...")
             GLib.idle_add(self._update_info_label, "Cleaning exFAT metadata...")
-            if not self._clean_exfat_metadata(mount_point):
+            if not self._clean_exfat_metadata(mount_point, drive_info):
                 print("exFAT cleaning failed, continuing with free space wipe...")
         
         wipe_folder = os.path.join(mount_point, "Free Space Cleaner")
